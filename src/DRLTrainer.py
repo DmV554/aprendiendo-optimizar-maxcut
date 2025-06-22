@@ -38,6 +38,10 @@ class DRLTrainer:
             weights = generate_random_instance(num_nodes, density=density, min_weight=10, max_weight=20)
             instance = MaxCutInstance(weights)
             env = DRLEnvironment(instance)
+
+            # Obtener la estrategia desde el config. Usar 'random' como valor por defecto seguro.
+            strategy = self.config.get('ordering_strategy', 'random')
+            state = env.reset(ordering_strategy=strategy)
             
             state = env.reset()
             done = False

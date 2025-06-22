@@ -16,11 +16,11 @@ def main():
         'lr': 0.0001,  # Estaba en 0.0005
         'gamma': 0.99,
         'hidden_dim': 128,
-        'entropy_coef': 0.1 # Estaba implícitamente en 0.01
+        'entropy_coef': 0.01,
+        'ordering_strategy': 'weighted_degree_high_low'  # Estrategia de ordenamiento de nodos
     }
     # Dimensiones de las características de entrada para la red
-    # [No Asignado, Asignado a P0, Asignado a P1]
-    input_dim = 3
+    input_dim = 8
     
     # Inicializar el agente
     agent = A2CAgent(

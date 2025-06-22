@@ -23,6 +23,8 @@ class DRLEnvironment:
         self.node_order = None
         self.current_step = 0
         self.current_partition = None
+        self.static_degrees = None
+        self.static_weighted_degrees = None
         
         # Precompute edge_index and edge_attr from the weights matrix
         self.edge_index, self.edge_attr = self._create_edge_tensors()
@@ -56,7 +58,7 @@ class DRLEnvironment:
         
         return edge_index, edge_attr
 
-    def reset(self, shuffle_nodes=True):
+    def reset(self, ordering_strategy='random'):
         """
         Reinicia el entorno para un nuevo episodio.
 
@@ -70,10 +72,29 @@ class DRLEnvironment:
         # La partición se inicializa con -1 (no asignado)
         self.current_partition = torch.full((self.num_nodes,), -1, dtype=torch.float)
 
-        if shuffle_nodes:
+        # --- AQUÍ ES DONDE OCURRE LA MAGIA ---
+        if ordering_strategy == 'random':
             self.node_order = torch.randperm(self.num_nodes)
+        
+        elif ordering_strategy == 'degree_high_low':
+            # gt(0) crea una matriz booleana de adyacencia, sum(dim=1) calcula el grado
+            degrees = self.weights_matrix.gt(0).sum(dim=1)
+            self.node_order = torch.argsort(degrees, descending=True)
+
+        elif ordering_strategy == 'degree_low_high':
+            degrees = self.weights_matrix.gt(0).sum(dim=1)
+            self.node_order = torch.argsort(degrees, descending=False)
+            
+        elif ordering_strategy == 'weighted_degree_high_low':
+            # Simplemente sumamos los pesos de las aristas para cada nodo
+            weighted_degrees = self.weights_matrix.sum(dim=1)
+            self.node_order = torch.argsort(weighted_degrees, descending=True)
+
         else:
-            self.node_order = torch.arange(self.num_nodes)
+            self.node_order = torch.randperm(self.num_nodes)
+
+        self.static_degrees = self.weights_matrix.gt(0).sum(dim=1)
+        self.static_weighted_degrees = self.weights_matrix.sum(dim=1)
 
         return self._get_state()
 
@@ -86,21 +107,53 @@ class DRLEnvironment:
         """
         # Componente Dinámico: Matriz de características de nodos X_t
         # 
-        # Feature 1: Indicador de Asignación (1 si está asignado, 0 si no). 
-        # Feature 2: Identificador de Partición (0 o 1 si está asignado, -1 si no). 
-        # Se adapta ligeramente la codificación para que sea más fácil para la GNN.
-        # Usaremos one-hot encoding para el estado de asignación.
-        # [No Asignado, Asignado a P0, Asignado a P1]
-        node_features = torch.zeros(self.num_nodes, 3)
-        for i in range(self.num_nodes):
-            if self.current_partition[i] == -1:
-                node_features[i, 0] = 1 # No asignado
-            elif self.current_partition[i] == 0:
-                node_features[i, 1] = 1 # Asignado a P0
-            else: # == 1
-                node_features[i, 2] = 1 # Asignado a P1
+        # El nuevo vector de características para cada nodo tendrá 8 dimensiones:
+        # 0: Indicador: No Asignado
+        # 1: Indicador: En Partición 0
+        # 2: Indicador: En Partición 1
+        # 3: Indicador: Es el nodo a decidir ahora
+        # 4: Estática: Grado del nodo
+        # 5: Estática: Suma de pesos de aristas incidentes
+        # 6: Dinámica: Suma de pesos a nodos en Partición 0
+        # 7: Dinámica: Suma de pesos a nodos en Partición 1
 
-        # Crear y retornar objeto Data de PyTorch Geometric
+        num_features = 8  # Número de características por nodo
+
+        node_features = torch.zeros(self.num_nodes, num_features)
+
+        if not self.is_done():
+            node_to_decide_idx = self.node_order[self.current_step].item()
+        else:
+            node_to_decide_idx = -1
+
+        assigned_to_0_mask = (self.current_partition == 0)
+        assigned_to_1_mask = (self.current_partition == 1)
+
+
+        for i in range(self.num_nodes):
+            # Característica 0-2: Estado de asignación (one-hot)
+            assignment = self.current_partition[i]
+            if assignment == -1:
+                node_features[i, 0] = 1
+            elif assignment == 0:
+                node_features[i, 1] = 1
+            else: # == 1
+                node_features[i, 2] = 1
+                
+            # Característica 3: Indicador del vértice a decidir
+            if i == node_to_decide_idx:
+                node_features[i, 3] = 1
+
+            # Característica 4-5: Propiedades estáticas (pre-calculadas)
+            node_features[i, 4] = self.static_degrees[i]
+            node_features[i, 5] = self.static_weighted_degrees[i]
+
+            # Característica 6-7: Conectividad con particiones
+            # Suma de pesos de las aristas desde el nodo `i` a nodos en la partición 0
+            node_features[i, 6] = self.weights_matrix[i, assigned_to_0_mask].sum()
+            # Suma de pesos de las aristas desde el nodo `i` a nodos en la partición 1
+            node_features[i, 7] = self.weights_matrix[i, assigned_to_1_mask].sum()
+ 
         return Data(
             x=node_features,
             edge_index=self.edge_index,
