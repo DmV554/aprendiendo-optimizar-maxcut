@@ -35,13 +35,15 @@ class DRLTrainer:
 
         for episode in progress_bar:
             # Generar una nueva instancia para cada episodio para mejorar la generalización
-            weights = generate_random_instance(num_nodes, density=density)
+            weights = generate_random_instance(num_nodes, density=density, min_weight=10, max_weight=20)
             instance = MaxCutInstance(weights)
             env = DRLEnvironment(instance)
             
             state = env.reset()
             done = False
             total_episode_reward = 0
+            
+           
 
             # Un episodio consiste en construir una solución completa 
             while not done:
@@ -63,11 +65,12 @@ class DRLTrainer:
                 self.all_time_best_cut = final_cut
             
             if episode % 50 == 0:
-                 progress_bar.set_postfix({
-                     'Pérdida': f'{loss:.3f}',
-                     'Último Corte': f'{final_cut:.2f}',
-                     'Mejor Corte': f'{self.all_time_best_cut:.2f}'
-                 })
+                progress_bar.set_postfix({
+                    'Pérdida': f'{loss:.3f}',
+                    # --- CAMBIO AQUÍ: Usa total_episode_reward ---
+                    'Corte Episodio': f'{total_episode_reward:.2f}',
+                    'Mejor Corte': f'{self.all_time_best_cut:.2f}'
+                })
                  
         print("Entrenamiento finalizado.")
         print(f"Mejor valor de corte encontrado durante el entrenamiento: {self.all_time_best_cut}")

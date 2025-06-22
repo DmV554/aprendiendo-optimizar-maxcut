@@ -2,6 +2,7 @@
 
 import torch
 import numpy as np
+from torch_geometric.data import Data
 from MAXCUT import MaxCutInstance, MaxCutState
 
 class DRLEnvironment:
@@ -22,6 +23,38 @@ class DRLEnvironment:
         self.node_order = None
         self.current_step = 0
         self.current_partition = None
+        
+        # Precompute edge_index and edge_attr from the weights matrix
+        self.edge_index, self.edge_attr = self._create_edge_tensors()
+
+    def _create_edge_tensors(self):
+        """
+        Crea los tensores edge_index y edge_attr a partir de la matriz de pesos.
+        
+        Returns:
+            tuple: (edge_index, edge_attr) donde edge_index es de forma [2, num_edges] 
+                   y edge_attr contiene los pesos de las aristas.
+        """
+        # Encontrar todas las aristas (donde weight > 0)
+        edges = []
+        edge_weights = []
+        
+        for i in range(self.num_nodes):
+            for j in range(i + 1, self.num_nodes):  # Solo considerar aristas únicas (i < j)
+                if self.weights_matrix[i, j] > 0:
+                    # Agregar arista en ambas direcciones para grafo no dirigido
+                    edges.extend([[i, j], [j, i]])
+                    edge_weights.extend([self.weights_matrix[i, j], self.weights_matrix[i, j]])
+        
+        if len(edges) == 0:
+            # Grafo sin aristas
+            edge_index = torch.empty((2, 0), dtype=torch.long)
+            edge_attr = torch.empty((0,), dtype=torch.float)
+        else:
+            edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+            edge_attr = torch.tensor(edge_weights, dtype=torch.float)
+        
+        return edge_index, edge_attr
 
     def reset(self, shuffle_nodes=True):
         """
@@ -31,7 +64,7 @@ class DRLEnvironment:
             shuffle_nodes (bool): Si es True, el orden en que se visitan los nodos será aleatorio.
 
         Returns:
-            tuple: El estado inicial (matriz de adyacencia, matriz de características de nodos).
+            Data: El estado inicial como objeto Data de PyTorch Geometric.
         """
         self.current_step = 0
         # La partición se inicializa con -1 (no asignado)
@@ -46,10 +79,10 @@ class DRLEnvironment:
 
     def _get_state(self):
         """
-        Construye la representación del estado actual.
+        Construye la representación del estado actual como objeto Data de PyTorch Geometric.
 
         Returns:
-            tuple: (adjacency_matrix, node_features_matrix)
+            Data: Objeto Data con x (node features), edge_index, y edge_attr.
         """
         # Componente Dinámico: Matriz de características de nodos X_t
         # 
@@ -67,9 +100,12 @@ class DRLEnvironment:
             else: # == 1
                 node_features[i, 2] = 1 # Asignado a P1
 
-        # Componente Estático: Matriz de adyacencia G 
-        # El estado completo es la tupla (G, X_t) 
-        return (self.weights_matrix, node_features)
+        # Crear y retornar objeto Data de PyTorch Geometric
+        return Data(
+            x=node_features,
+            edge_index=self.edge_index,
+            edge_attr=self.edge_attr
+        )
 
     def step(self, action: int):
         """
@@ -79,7 +115,7 @@ class DRLEnvironment:
             action (int): La acción a tomar (0 para partición 0, 1 para partición 1).
 
         Returns:
-            tuple: (next_state, reward, done)
+            tuple: (next_state, reward, done) donde next_state es un objeto Data.
         """
         if self.is_done():
             raise Exception("El episodio ha terminado. Llama a reset() para empezar uno nuevo.")

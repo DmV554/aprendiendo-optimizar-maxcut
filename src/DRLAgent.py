@@ -6,70 +6,65 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 from torch_geometric.nn import GATConv
 from torch_geometric.data import Data
-from torch_geometric.utils import dense_to_edge_index
 
 class ActorCriticGAT(nn.Module):
-    """
-    Define la red Actor-Critic con una arquitectura GAT como encoder,
-    como se describe en "Propuesta_DRL_para_MCP.pdf". 
-    """
     def __init__(self, input_dim, hidden_dim, heads=4):
-        """
-        Inicializa la red.
-
-        Args:
-            input_dim (int): Dimensión de las características de cada nodo (en nuestro caso, 3).
-            hidden_dim (int): Dimensión de la capa oculta de la GAT.
-            heads (int): Número de cabezas de atención en la GAT. 
-        """
         super(ActorCriticGAT, self).__init__()
 
-        # Codificador GAT 
-        self.gat1 = GATConv(input_dim, hidden_dim, heads=heads)
-        self.gat2 = GATConv(hidden_dim * heads, hidden_dim, heads=1)
+        self.gat1 = GATConv(input_dim, hidden_dim, heads=heads, dropout=0.1)
 
-        # Decodificador: Cabeza de Política (Actor) 
-        self.policy_head = nn.Linear(hidden_dim, 2) # 2 acciones: partición 0 o 1
+        self.gat2 = GATConv(hidden_dim * heads, hidden_dim, heads=heads, dropout=0.1)
 
-        # Decodificador: Cabeza de Valor (Crítico) 
-        self.value_head = nn.Linear(hidden_dim, 1) # Estima el valor del estado
+        self.gat3 = GATConv(hidden_dim * heads, hidden_dim, heads=1, dropout=0.1)
 
-    def forward(self, state, current_node_idx=None):
+        self.policy_head = nn.Linear(hidden_dim * 2, 2)
+        self.value_head = nn.Linear(hidden_dim, 1)
+
+    def forward(self, data, current_node_idx: int = None):
         """
         Forward pass de la red.
 
         Args:
-            state (tuple): El estado (adj_matrix, node_features).
+            data: El estado del grafo. Puede ser un objeto Data de PyG o una tupla (x, edge_index, edge_attr).
             current_node_idx (int, optional): El índice del nodo a decidir. Requerido por el Actor.
 
         Returns:
-            Si current_node_idx es not None -> (action_probs, state_value)
+            Si current_node_idx is not None -> (action_probs, state_value)
             Si current_node_idx es None -> (state_value)
         """
-        adj_matrix, node_features = state
+        # Manejo flexible del input - puede ser Data object o tupla
+        if isinstance(data, Data):
+            x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
+        elif isinstance(data, tuple) and len(data) == 3:
+            x, edge_index, edge_attr = data
+        else:
+            raise ValueError(f"Formato de data no soportado: {type(data)}. Se esperaba Data object o tupla (x, edge_index, edge_attr)")
         
-        # Convertir matriz de adyacencia densa a formato de lista de aristas para PyG
-        edge_index, edge_attr = dense_to_edge_index(adj_matrix)
-        
-        # Codificador GAT
-        x = F.relu(self.gat1(node_features, edge_index, edge_attr=edge_attr))
-        x = F.dropout(x, p=0.6, training=self.training)
-        embeddings = self.gat2(x, edge_index, edge_attr=edge_attr) # Embeddings de todos los nodos 
-        
-        # Cabeza de Valor (Crítico) - Estima el valor del estado global
-        # Usamos el embedding promedio del grafo como entrada para la cabeza de valor
+        # Verificar que los tensores tienen las dimensiones correctas
+        if x is None or edge_index is None:
+            raise ValueError("x y edge_index no pueden ser None")
+            
+        x = F.dropout(x, p=0.1, training=self.training)
+        x = F.elu(self.gat1(x, edge_index, edge_attr=edge_attr))
+        x = F.dropout(x, p=0.1, training=self.training)
+        x = F.elu(self.gat2(x, edge_index, edge_attr=edge_attr))
+        x = F.dropout(x, p=0.1, training=self.training)
+
+        embeddings = self.gat3(x, edge_index, edge_attr=edge_attr)
         graph_embedding = embeddings.mean(dim=0)
         state_value = self.value_head(graph_embedding)
 
         if current_node_idx is not None:
-            # Cabeza de Política (Actor) - Usa el embedding del nodo a decidir
             node_embedding = embeddings[current_node_idx]
-            action_logits = self.policy_head(node_embedding)
+
+            combined_embedding = torch.cat([node_embedding, graph_embedding])
+
+            action_logits = self.policy_head(combined_embedding)
             action_probs = F.softmax(action_logits, dim=-1)
             return action_probs, state_value
         else:
-            # Si solo se necesita el valor (ej, al final del episodio)
             return state_value
+
 
 class A2CAgent:
     """
@@ -98,27 +93,34 @@ class A2CAgent:
         self.dones = []
         self.entropies = [] # AÑADIDO: Buffer para almacenar la entropía de cada paso
 
-    def select_action(self, state, current_node_idx):
+    def select_action(self, state, current_node_idx: int):
         """
-        Selecciona una acción basada en la política actual (muestreo estocástico).
+        Selecciona una acción basada en la política actual (muestreo estocástico). 
         
         Args:
-            state (tuple): El estado actual del entorno.
+            state: El estado actual del entorno (Data object o tupla).
             current_node_idx (int): El nodo para el cual se debe tomar una decisión.
 
         Returns:
             int: La acción seleccionada (0 o 1).
         """
-        action_probs, state_value = self.policy_network(state, current_node_idx)
+        # El estado ahora debería ser un objeto Data de PyTorch Geometric
         
-        # Crear una distribución categórica y muestrear una acción
+        # Mantener el modelo en modo de entrenamiento para preservar gradientes
+        self.policy_network.train()
+        
+        # NO usar torch.no_grad() aquí porque necesitamos los gradientes
+        action_probs, state_value = self.policy_network(state, current_node_idx)
+
+        # Crear una distribución categórica y muestrear una acción para balancear exploración/explotación.
         dist = Categorical(action_probs)
         action = dist.sample()
         
-        # Guardar el log de la probabilidad de la acción y el valor del estado
+        # Guardar datos relevantes para la actualización de la política.
+        # Estos tensores deben mantener sus gradientes
         self.log_probs.append(dist.log_prob(action))
         self.values.append(state_value)
-        self.entropies.append(dist.entropy()) # AÑADIDO: Guardar la entropía de la distribución
+        self.entropies.append(dist.entropy())
         
         return action.item()
 
@@ -131,55 +133,98 @@ class A2CAgent:
         """
         Actualiza los pesos de la red al final de un episodio usando el marco A2C.
         """
-        # Calcular el valor del estado terminal
+        # Verificar que tenemos experiencias para entrenar
+        if len(self.rewards) == 0:
+            print("Warning: No hay experiencias para entrenar")
+            return 0.0
+        
+        # Calcular el valor del estado terminal para el bootstrapping.
         with torch.no_grad():
-            last_value = self.policy_network(last_state) if not self.dones[-1] else torch.tensor(0.0)
-            self.values.append(last_value)
-
-        # Calcular los retornos y ventajas 
+            # Si el episodio no ha terminado, obtenemos el valor del último estado.
+            # Si terminó, el valor es 0.
+            if not self.dones[-1]:
+                last_value = self.policy_network(last_state)
+            else:
+                last_value = torch.tensor(0.0)
+        
+        # Calcular los retornos y ventajas de forma retrospectiva.
         returns = []
         R = last_value
         for t in reversed(range(len(self.rewards))):
             R = self.rewards[t] + self.gamma * R * (1 - self.dones[t])
             returns.insert(0, R)
             
-        returns = torch.tensor(returns)
+        returns = torch.tensor(returns, requires_grad=False)
+        
+        # Verificar que tenemos valores para concatenar
+        if len(self.values) == 0:
+            print("Warning: No hay valores para concatenar")
+            return 0.0
+            
         values = torch.cat(self.values).squeeze()
         
-        # Normalizar retornos puede ayudar a estabilizar el entrenamiento
-        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        # Asegurar que values requiere gradientes
+        if not values.requires_grad:
+            print("Warning: Los valores no requieren gradientes")
+            return 0.0
         
-        advantages = returns - values
+        # Normalizar retornos o ventajas puede estabilizar el entrenamiento.
+        advantages = returns - values.detach()  # Detach values para calcular advantages
+        if advantages.numel() > 1:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         
-        # Calcular la pérdida del Actor (política) y Crítico (valor)
+        # Calcular las pérdidas del Actor y del Crítico.
         log_probs = torch.stack(self.log_probs)
         
-        policy_loss = (-log_probs * advantages.detach()).mean() # 
-        value_loss = F.mse_loss(returns, values) #
+        # Verificar que log_probs requiere gradientes
+        if not log_probs.requires_grad:
+            print("Warning: Los log_probs no requieren gradientes")
+            return 0.0
+        
+        # Pérdida del Actor (Política): anima a tomar acciones con alta ventaja.
+        policy_loss = (-log_probs * advantages.detach()).mean()
+        
+        # Pérdida del Crítico (Valor): MSE entre los retornos reales y los predichos.
+        value_loss = F.mse_loss(values, returns)
 
-        # Queremos maximizar la entropía, por lo que minimizamos su negativo.
-        # Calculamos la media de la entropía a lo largo del episodio.
-        entropy_loss = torch.stack(self.entropies).mean() 
+        # Pérdida de Entropía: Anima a la política a ser más estocástica para mejorar la exploración. 
+        entropy_loss = torch.stack(self.entropies).mean()
         
-        
-        # PÉRDIDA TOTAL ACTUALIZADA
-        # Restamos la pérdida de entropía multiplicada por su coeficiente.
+        # Pérdida total combinada.
         loss = policy_loss + 0.5 * value_loss - self.entropy_coef * entropy_loss
         
-        # Optimización
+        # Verificar que la pérdida requiere gradientes
+        if not loss.requires_grad:
+            print("Warning: La pérdida no requiere gradientes")
+            print(f"policy_loss.requires_grad: {policy_loss.requires_grad}")
+            print(f"value_loss.requires_grad: {value_loss.requires_grad}")
+            print(f"entropy_loss.requires_grad: {entropy_loss.requires_grad}")
+            return 0.0
+        
+        # Optimización.
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         
-        # Limpiar buffers para el próximo episodio
+        # Limpiar buffers para el próximo episodio.
         self.clear_buffers()
         
         return loss.item()
+    
+    def select_action_greedy(self, state, current_node_idx: int):
+        """
+        Selecciona la mejor acción posible de forma determinista (greedy) para la evaluación.
+        """
+        self.policy_network.eval() # Poner la red en modo de evaluación
+        with torch.no_grad(): # Desactivar el cálculo de gradientes para la inferencia
+            action_probs, _  = self.policy_network(state, current_node_idx)
+            action = torch.argmax(action_probs).item() # Elegir la acción con la probabilidad más alta
+        return action
 
     def clear_buffers(self):
         """Limpia las memorias del episodio."""
-        del self.log_probs[:]
-        del self.rewards[:]
-        del self.values[:]
-        del self.dones[:]
-        del self.entropies[:] # AÑADIDO: Limpiar el buffer de entropías
+        self.log_probs.clear()
+        self.rewards.clear()
+        self.values.clear()
+        self.dones.clear()
+        self.entropies.clear()

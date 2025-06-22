@@ -10,14 +10,14 @@ def main():
     """
     # Configuración del entrenamiento
     config = {
-        'num_episodes': 5000,
-        'num_nodes': 30,       # Tamaño de los grafos de entrenamiento
+        'num_episodes': 20000,
+        'num_nodes': 30,
         'density': 0.8,
-        'lr': 0.0005,          # Tasa de aprendizaje
-        'gamma': 0.99,         # Factor de descuento
-        'hidden_dim': 128      # Dimensión de la capa oculta de la GNN
+        'lr': 0.0001,  # Estaba en 0.0005
+        'gamma': 0.99,
+        'hidden_dim': 128,
+        'entropy_coef': 0.1 # Estaba implícitamente en 0.01
     }
-    
     # Dimensiones de las características de entrada para la red
     # [No Asignado, Asignado a P0, Asignado a P1]
     input_dim = 3
