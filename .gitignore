@@ -1,2 +1,2 @@
 src/__pycache__
-drl_maxcut_model.pth
+drl_actor_critic_model.pth
