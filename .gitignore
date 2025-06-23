@@ -1,2 +1,3 @@
 src/__pycache__
-drl_actor_critic_model.pth
+drl_curriculum_mode*
+results

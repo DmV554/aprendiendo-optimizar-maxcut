@@ -16,10 +16,10 @@ from Agents import GreedyAgent, FirstImprovementAgent, SingleAgentSolver, Pertur
 from drl_agent import DRLAgent
 
 # --- Configuración del Experimento ---
-MODEL_PATH = "drl_actor_critic_model.pth"
+MODEL_PATH = "drl_curriculum_mode_GATv3.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-INSTANCE_SIZES = [20, 30, 40, 50, 60] # Tamaños de grafos a probar
+INSTANCE_SIZES = [120, 140, 180, 200] # Tamaños de grafos a probar
 NUM_INSTANCES_PER_SIZE = 10 # Número de instancias aleatorias por cada tamaño
 DENSITY = 0.8
 MIN_WEIGHT = 1

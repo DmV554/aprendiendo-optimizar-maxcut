@@ -2,7 +2,7 @@
 
 import torch
 # Asumimos que las siguientes clases y funciones están disponibles
-from drl_model import ActorCriticGAT
+from drl_model import ActorCriticGAT,ActorCriticGAT_V2,ActorCriticGAT_V3
 from drl_features import state_to_graph
 from MAXCUT import MaxCutState, MaxCutEnvironment
 
@@ -16,7 +16,7 @@ class DRLAgent:
             device (str): Dispositivo en el que correr el modelo ('cpu' o 'cuda').
         """
         self.device = torch.device(device)
-        self.model = ActorCriticGAT().to(self.device)
+        self.model = ActorCriticGAT_V3().to(self.device)
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.eval() # Poner el modelo en modo de evaluación
         
