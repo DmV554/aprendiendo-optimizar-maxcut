@@ -19,20 +19,36 @@ class MaxCutDRLEnv:
         self.node_order = None
         self.current_step = 0
 
-    def reset(self, shuffle_order=True):
+    def reset(self, order_strategy='random'):
         """
-        Reinicia el entorno a un estado inicial.
+        Reinicia el entorno a un estado inicial. 
         
         Args:
-            shuffle_order (bool): Si es True, el orden de asignación de nodos será aleatorio.
+            order_strategy (str): La estrategia para ordenar los nodos.
+                'random': Orden aleatorio en cada reseteo (comportamiento anterior). 
+                'degree_desc': Ordenado por grado de nodo, de mayor a menor.
+                'sequential': Orden secuencial por índice (0, 1, 2, ...).
         
         Returns:
-            tuple: La representación inicial del grafo (features, edge_index, edge_weight).
+            tuple: La representación inicial del grafo (features, edge_index, edge_weight). 
         """
         self.state = MaxCutState(self.instance)
         self.node_order = list(range(self.num_nodes))
-        if shuffle_order:
+
+        # --- NUEVA LÓGICA DE ORDENAMIENTO ---
+        if order_strategy == 'random':
             random.shuffle(self.node_order)
+        elif order_strategy == 'degree_desc':
+            # Calcular grados de los nodos (número de aristas no nulas)
+            degrees = np.sum(self.instance.weights_matrix != 0, axis=1)
+            # Ordenar la lista de nodos basada en los grados, de forma descendente
+            self.node_order = sorted(self.node_order, key=lambda n: degrees[n], reverse=True)
+        elif order_strategy == 'sequential':
+            # No hacer nada, ya está en orden secuencial por defecto
+            pass
+        else:
+            raise ValueError(f"Estrategia de ordenamiento desconocida: {order_strategy}")
+
         self.current_step = 0
         
         # El estado inicial tiene el primer nodo de la secuencia listo para ser asignado
@@ -40,22 +56,22 @@ class MaxCutDRLEnv:
 
     def step(self, action: int):
         """
-        Ejecuta un paso en el entorno.
+        Ejecuta un paso en el entorno. 
         
         Args:
-            action (int): La partición a la que asignar el nodo actual (0 o 1).
+            action (int): La partición a la que asignar el nodo actual (0 o 1). 
 
         Returns:
             tuple: Una tupla conteniendo:
-                - next_graph_repr (tuple): Representación del siguiente estado.
-                - reward (float): Recompensa obtenida en este paso.
-                - done (bool): True si el episodio ha terminado.
+                - next_graph_repr (tuple): Representación del siguiente estado. 
+                - reward (float): Recompensa obtenida en este paso. 
+                - done (bool): True si el episodio ha terminado. 
         """
         # 1. Obtener el nodo a asignar en este paso
         node_to_assign = self.node_order[self.current_step]
         
         # 2. Calcular la recompensa INMEDIATA (antes de actualizar el estado)
-        # La recompensa es la suma de los pesos de las aristas recién cortadas.
+        # La recompensa es la suma de los pesos de las aristas recién cortadas. 
         reward = 0.0
         # Iteramos sobre los nodos YA ASIGNADOS
         for i in range(self.num_nodes):

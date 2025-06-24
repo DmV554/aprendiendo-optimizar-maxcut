@@ -20,18 +20,18 @@ VALUE_LOSS_COEFF = 0.6
 # --- Estrategia de Curriculum Learning ---
 # Formato: (numero_de_episodios_para_la_etapa, tamaño_de_nodos_en_la_etapa)
 CURRICULUM = [
-    (1500, 20),  # Etapa 1: 1500 episodios con grafos de 20 nodos
-    (1500, 30),  # Etapa 2: 1500 episodios con grafos de 30 nodos
-    (2000, 40),   # Etapa 3: 2000 episodios con grafos de 40 nodos. Más episodios para la etapa más difícil.
-    (2000, 50),
-    (3000, 60)
+    (2000, 20),  # Etapa 1: 1500 episodios con grafos de 20 nodos
+    (2000, 30),  # Etapa 2: 1500 episodios con grafos de 30 nodos
+    (2500, 40),   # Etapa 3: 2000 episodios con grafos de 40 nodos. Más episodios para la etapa más difícil.
+    #(2000, 50),
+    #(3000, 60)
 ]
 DENSITY = 0.8 # Densidad de los grafos generados
 
 # --- Setup ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Elige aquí la arquitectura que quieres entrenar con el currículo
-model = ActorCriticGAT_V3().to(device) 
+model = ActorCriticGAT_V2().to(device) 
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 print(f"Iniciando entrenamiento con Curriculum Learning en: {device}")
@@ -54,7 +54,7 @@ for num_episodes_stage, num_nodes_stage in CURRICULUM:
         instance = MaxCutInstance(weights)
         env = MaxCutDRLEnv(instance)
         
-        graph_repr = env.reset()
+        graph_repr = env.reset(order_strategy="degree_desc")
         
         # Listas para almacenar los resultados del episodio
         log_probs = []
@@ -104,9 +104,10 @@ for num_episodes_stage, num_nodes_stage in CURRICULUM:
         values = torch.stack(values).squeeze(-1) # Usar squeeze(-1) para evitar errores si el batch es de 1
 
         # 3. Calcular Ventaja (Advantage) A_t = G_t - V(s_t)
+        # En train_drl.py, después de calcular advantages
         advantages = returns - values
-        
-        # 4. Calcular la Pérdida del Actor (Política)
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) # <-- AÑADIR ESTA LÍNEA
+
         actor_loss = -(log_probs * advantages.detach()).mean()
 
         # 5. Calcular la Pérdida del Crítico (Valor)

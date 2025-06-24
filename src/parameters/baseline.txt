@@ -1,0 +1,39 @@
+STRATEGIES_TO_RUN = {
+    "drl_g": {
+        "name": "DRL-G (Puro)",
+        "type": "constructive",
+        "agent_class": DRLAgent,
+        "agent_params": {"model_path": MODEL_PATH, "device": DEVICE},
+        "plot_style": {"marker": "o", "linestyle": "-"}
+    },
+    "heur_g": {
+        "name": "Heur-G (Baseline)",
+        "type": "constructive",
+        "agent_class": GreedyAgent,
+        "agent_params": {"eval_actions": evalConstructiveActions},
+        "plot_style": {"marker": "s", "linestyle": "-"}
+    },
+    "hybrid_drl_ls": {
+        "name": "DRL-G + LS (Híbrido)",
+        "type": "hybrid",
+        "constructor_agent_key": "drl_g", # Clave del agente constructor a usar
+        "local_search_params": {
+            "neighborhood_type": "flip",
+            "max_actions": 1500
+        },
+        "plot_style": {"marker": "*", "linestyle": "-", "markersize": 12, "linewidth": 2.5}
+    },
+    "ils": {
+        "name": "ILS (Experto)",
+        "type": "ils",
+        "local_search_params": { # Parámetros para la búsqueda local dentro de ILS
+            "neighborhood_type": "flip",
+            "max_actions": 1500
+        },
+        "ils_params": { # Parámetros específicos de ILS
+            "pert_size_factor": 0.20,
+            "max_iterations": 150
+        },
+        "plot_style": {"marker": "P", "linestyle": "--"}
+    }
+}

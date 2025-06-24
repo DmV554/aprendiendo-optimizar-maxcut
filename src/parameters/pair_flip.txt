@@ -1,0 +1,35 @@
+STRATEGIES_TO_RUN = {
+    # Mantenemos el DRL constructivo puro como referencia
+    "drl_g": {
+        "name": "DRL-G (Puro)",
+        "type": "constructive",
+        "agent_class": DRLAgent,
+        "agent_params": {"model_path": MODEL_PATH, "device": DEVICE},
+        "plot_style": {"marker": "o", "linestyle": "-"}
+    },
+    # Versión Híbrida usando pair_flip
+    "hybrid_drl_ls_pflip": {
+        "name": "DRL-G + LS (pair_flip)",
+        "type": "hybrid",
+        "constructor_agent_key": "drl_g",
+        "local_search_params": {
+            "neighborhood_type": "pair_flip", # <-- CAMBIO CLAVE
+            "max_actions": 500
+        },
+        "plot_style": {"marker": "D", "linestyle": "-", "markersize": 9, "linewidth": 2.5}
+    },
+    # Versión de ILS usando pair_flip
+    "ils_pflip": {
+        "name": "ILS (pair_flip)",
+        "type": "ils",
+        "local_search_params": {
+            "neighborhood_type": "pair_flip", # <-- CAMBIO CLAVE
+            "max_actions": 500
+        },
+        "ils_params": {
+            "pert_size_factor": 0.10,
+            "max_iterations": 100
+        },
+        "plot_style": {"marker": "P", "linestyle": "--"}
+    }
+}

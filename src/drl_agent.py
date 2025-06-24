@@ -16,7 +16,7 @@ class DRLAgent:
             device (str): Dispositivo en el que correr el modelo ('cpu' o 'cuda').
         """
         self.device = torch.device(device)
-        self.model = ActorCriticGAT_V3().to(self.device)
+        self.model = ActorCriticGAT_V2().to(self.device)
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.eval() # Poner el modelo en modo de evaluación
         
